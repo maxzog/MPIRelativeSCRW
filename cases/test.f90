@@ -22,7 +22,7 @@ program test
    L = 6.2832
    nbins = 64
    delta = L/nbins
-   np = 4
+   np = 250000
 
    t = 0.0
    tf = 11.0
@@ -39,9 +39,9 @@ program test
       call sim%check_and_correct_bounds()
       call sim%increment_time(a, b)
       call sim%check_time()
-      if (mod(sim%step, 250).eq.0) then
-         call sim%print()
-         call sim%write_particle_data("./outs/test.dat", rank)
+      if (sim%rank.eq.0) call sim%print()
+      if (mod(sim%step, 100).eq.0) then
+         call sim%write_particle_data("./outs/test.dat")
       end if
    end do
 

@@ -249,7 +249,7 @@ contains
       ! Get size of one particle
       particle_size = 7*8
       ! Calc displacement for parallel write
-      disp = sim%rank*this%npart*particle_size
+      disp = this%rank*this%npart*particle_size
       
       ! Cautionary
       call MPI_BARRIER(MPI_COMM_WORLD, ierr)
