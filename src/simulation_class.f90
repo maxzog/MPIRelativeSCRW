@@ -22,8 +22,12 @@ module simulation_class
         real(8) :: t, tf, dt
         integer(4) :: step, stepf
         logical :: isRun=.true.
+        integer(4) :: particles_removed
 
-        real(8), dimension(:), allocatable :: rdf
+        real(8), dimension(:), allocatable :: rdf !> Radial distribution function
+        real(8), dimension(:), allocatable :: w1  !> Mean relative velocity conditioned on r
+        real(8), dimension(:), allocatable :: w2  !> Second moment of rel. vel. conditioned on r
+        integer, dimension(:), allocatable :: c   !> Bin counter
       contains
         procedure :: init
         procedure :: increment_time        !> Step forward particle SDEs/ODEs in time
@@ -32,7 +36,11 @@ module simulation_class
         procedure :: write_particle_data   !> Routine to write particle information to text
         procedure :: print
         procedure :: compute_rdf
+        procedure :: compute_w1
+        procedure :: compute_w2
         procedure :: write_rdf
+        procedure :: write_w1
+        procedure :: write_w2
     end type simulation
 
 contains
@@ -54,6 +62,7 @@ contains
       self%numbins = numbins
       self%length = length
       self%delta = delta
+      self%particles_removed = 0
 
       ! Particle storage
       self%npart = npart
@@ -64,11 +73,10 @@ contains
       end if
 
       ! Stat storage
-      allocate(self%rdf(1:self%numbins))
-      if (.not. allocated(self%rdf)) then
-         print *, 'Error: Allocation of self%rdf failed.'
-         stop
-      end if
+      allocate(self%rdf(1:self%numbins)); self%rdf=0.0
+      allocate(self%w1( 1:self%numbins)); self%w1 =0.0
+      allocate(self%w2( 1:self%numbins)); self%w2 =0.0
+      allocate(self%c(  1:self%numbins)); self%c  =0
       
       ! Particles
       do i=1,self%npart
@@ -239,17 +247,24 @@ contains
    end subroutine increment_time
 
    subroutine check_and_correct_bounds(this)
+      use mpi
       implicit none
       class(simulation), intent(inout) :: this
       real(8) :: r
-      integer :: i
+      integer :: i, ierr
+
+      ! Reset counter
+      this%particles_removed=0
 
       do i=1,this%npart
          r = norm2(this%ps(i)%pos)
          if (r.gt.this%length) then
             this%ps(i)%pos = get_rand_pos(this%length)
+            this%particles_removed = this%particles_removed + 1
          end if
       end do
+
+      call MPI_ALLREDUCE(MPI_IN_PLACE, this%particles_removed, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
    end subroutine check_and_correct_bounds
 
    subroutine check_time(this)
@@ -288,7 +303,7 @@ contains
    implicit none
    class(simulation), intent(in) :: this
 
-   print *, "Time :: ", this%t, "  ", "Step :: ", this%step
+   write(*,'(A, F8.2, A, I5, A, I5)') "Time :: ", this%t, "   Step :: ", this%step, "  Particles removed :: ", this%particles_removed
   end subroutine print
 
 
@@ -321,6 +336,76 @@ contains
    this%rdf=this%rdf/this%numproc
   end subroutine compute_rdf
 
+  subroutine compute_w1(this)
+   use mpi
+   implicit none
+   class(simulation), intent(inout) :: this
+   real(8) :: r
+   real(8), dimension(3) :: rhat
+   integer :: i, ierr, ir
+   
+   ! Reset
+   this%w1=0.0
+   this%c=0
+
+   ! Compute and bin relative velocity
+   do i=1,this%npart
+      r  = norm2(this%ps(i)%pos)
+      ir = ceiling(r/this%delta)
+      ir = min(this%numbins, ir)
+      rhat = this%ps(i)%pos/r
+      
+      this%w1(ir) = this%w1(ir) + dot_product(this%ps(i)%vel,rhat) 
+      this%c(ir) = this%c(ir) + 1
+   end do
+
+   ! Normalize by bin counter
+   do i=1,this%numbins
+      if (this%c(i).gt.0) then
+         this%w1(i) = this%w1(i)/this%c(i)
+      end if
+   end do
+
+   ! Reduce and normalize by number of processes
+   call MPI_ALLREDUCE(MPI_IN_PLACE, this%w1, this%numbins, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, ierr)
+   this%w1 = this%w1/this%numproc
+  end subroutine compute_w1
+
+  subroutine compute_w2(this)
+   use mpi
+   implicit none
+   class(simulation), intent(inout) :: this
+   real(8) :: r
+   real(8), dimension(3) :: rhat
+   integer :: i, ierr, ir
+
+   ! Reset
+   this%w2=0.0
+   this%c=0
+
+   ! Compute and bin relative velocity
+   do i=1,this%npart
+      r  = norm2(this%ps(i)%pos)
+      ir = ceiling(r/this%delta)
+      ir = min(this%numbins, ir)
+      rhat = this%ps(i)%pos/r
+      
+      this%w2(ir) = this%w2(ir) + dot_product(this%ps(i)%vel,rhat)**2
+      this%c(ir) = this%c(ir) + 1
+   end do
+
+   ! Normalize by bin counter
+   do i=1,this%numbins
+      if (this%c(i).gt.0) then
+         this%w2(i) = this%w2(i)/this%c(i)
+      end if
+   end do
+
+   ! Reduce and normalize by number of processes
+   call MPI_ALLREDUCE(MPI_IN_PLACE, this%w2, this%numbins, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, ierr)
+   this%w2 = this%w2/this%numproc
+  end subroutine compute_w2
+
   subroutine write_rdf(this, filename)
    implicit none
    class(simulation), intent(in) :: this
@@ -339,6 +424,44 @@ contains
    ! Close the binary file
    close(unit) 
   end subroutine write_rdf
+
+  subroutine write_w1(this, filename)
+   implicit none
+   class(simulation), intent(in) :: this
+   character(len=*), intent(in) :: filename
+   integer :: i
+   integer :: unit
+   
+   ! Open the binary file for writing
+   open(newunit=unit, file=filename, status='replace', form='unformatted', access='stream')
+
+   ! Write velocities to the binary file
+   do i = 1, this%numbins
+      write(unit) this%w1(i)
+   end do
+
+   ! Close the binary file
+   close(unit) 
+  end subroutine write_w1
+
+  subroutine write_w2(this, filename)
+   implicit none
+   class(simulation), intent(in) :: this
+   character(len=*), intent(in) :: filename
+   integer :: i
+   integer :: unit
+   
+   ! Open the binary file for writing
+   open(newunit=unit, file=filename, status='replace', form='unformatted', access='stream')
+
+   ! Write velocities to the binary file
+   do i = 1, this%numbins
+      write(unit) this%w2(i)
+   end do
+
+   ! Close the binary file
+   close(unit) 
+  end subroutine write_w2
 
 
 end module simulation_class

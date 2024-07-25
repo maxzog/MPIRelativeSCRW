@@ -22,7 +22,7 @@ program test
    L = 6.2832
    nbins = 64
    delta = L/nbins
-   np = 250000
+   np = 100000
 
    t = 0.0
    tf = 11.0
@@ -52,7 +52,11 @@ program test
       if (mod(sim%step, 100).eq.0) then
          call sim%write_particle_data("./outs/test.dat")
          call sim%compute_rdf()
-         call sim%write_rdf("./outs/rdf.dat")
+         call sim%compute_w1()
+         call sim%compute_w2()
+         if (sim%rank.eq.0) call sim%write_rdf("./outs/rdf.dat")
+         if (sim%rank.eq.0) call sim%write_w1("./outs/w1.dat")
+         if (sim%rank.eq.0) call sim%write_w2("./outs/w2.dat")
       end if
    end do
 
