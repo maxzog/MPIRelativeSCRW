@@ -5,6 +5,8 @@ module simulation_class
     public :: part
     public :: simulation
 
+    real(8), public :: PI = 3.1415926535897932385
+
     type :: part
         real(8) :: id         !> Particle id number
         real(8) :: pos(3)     !> Particle position
@@ -14,12 +16,14 @@ module simulation_class
     type :: simulation
         integer :: npart                       !> Number of particles
         type(part), allocatable :: ps(:)       !> Vector containing particles
-        integer :: numbins, rank
+        integer :: numbins, rank, numproc
         real(8) :: delta
         real(8) :: length
         real(8) :: t, tf, dt
         integer(4) :: step, stepf
         logical :: isRun=.true.
+
+        real(8), dimension(:), allocatable :: rdf
       contains
         procedure :: init
         procedure :: increment_time        !> Step forward particle SDEs/ODEs in time
@@ -27,37 +31,53 @@ module simulation_class
         procedure :: check_and_correct_bounds
         procedure :: write_particle_data   !> Routine to write particle information to text
         procedure :: print
+        procedure :: compute_rdf
+        procedure :: write_rdf
     end type simulation
 
 contains
 
-   subroutine init(self, npart, length, numbins, delta, t, tf, dt, step, stepf, rank) 
+   subroutine init(self, npart, length, numbins, delta, t, tf, dt, step, stepf, rank, numproc) 
       implicit none
       class(simulation), intent(out) :: self
-      integer, intent(in) :: npart, numbins, stepf, step, rank
+      integer, intent(in) :: npart, numbins, stepf, step, rank, numproc
       real(8), intent(in) :: length, tf, dt, delta, t
       integer :: i
 
+      call random_initialize
+
+      ! MPI
+      self%numproc = numproc
       self%rank = rank
-      self%npart = npart
+
+      ! Domain and stats
       self%numbins = numbins
       self%length = length
       self%delta = delta
-      
-      call random_initialize
 
+      ! Particle storage
+      self%npart = npart
       allocate(self%ps(1:self%npart))
       if (.not. allocated(self%ps)) then
          print *, 'Error: Allocation of self%ps failed.'
          stop
       end if
+
+      ! Stat storage
+      allocate(self%rdf(1:self%numbins))
+      if (.not. allocated(self%rdf)) then
+         print *, 'Error: Allocation of self%rdf failed.'
+         stop
+      end if
       
+      ! Particles
       do i=1,self%npart
          self%ps(i)%pos = get_rand_pos(self%length)
          self%ps(i)%vel = 0.0
          self%ps(i)%id  = real(i + rank*npart, 8)
       end do
 
+      ! Time tracking
       self%t = t
       self%tf = tf
       self%dt = dt
@@ -203,8 +223,12 @@ contains
       do i=1,this%npart
          p = this%ps(i)
          rho = kernel(p%pos, this%delta)
-         dWi = [random_normal(m=mean,sd=sqrt(this%dt)), random_normal(m=mean,sd=sqrt(this%dt)), random_normal(m=mean,sd=sqrt(this%dt))]
-         dWj = [random_normal(m=mean,sd=sqrt(this%dt)), random_normal(m=mean,sd=sqrt(this%dt)), random_normal(m=mean,sd=sqrt(this%dt))]
+         dWi = [random_normal(m=mean,sd=sqrt(this%dt)), & 
+         &      random_normal(m=mean,sd=sqrt(this%dt)), & 
+         &      random_normal(m=mean,sd=sqrt(this%dt))]
+         dWj = [random_normal(m=mean,sd=sqrt(this%dt)), & 
+         &      random_normal(m=mean,sd=sqrt(this%dt)), & 
+         &      random_normal(m=mean,sd=sqrt(this%dt))]
          p%vel = (1.0 - a*this%dt)*p%vel + b*((1.0 - rho)*dWi + (rho - 1.0)*dWj)/sqrt(1.0 + rho**2)
          p%pos = p%pos + p%vel*this%dt
          this%ps(i) = p
@@ -266,5 +290,55 @@ contains
 
    print *, "Time :: ", this%t, "  ", "Step :: ", this%step
   end subroutine print
+
+
+  subroutine compute_rdf(this)
+   use mpi
+   implicit none
+   class(simulation), intent(inout) :: this
+   real(8) :: r, density, vol
+   integer :: i, ir, ierr
+   real(8), dimension(:), allocatable :: tmp_rdf
+
+   allocate(tmp_rdf(1:this%numbins)); tmp_rdf=0.0
+
+   do i=1,this%npart
+      r  = norm2(this%ps(i)%pos)
+      ir = ceiling(r/this%delta)
+      ir = min(this%numbins, ir)
+      tmp_rdf(ir) = tmp_rdf(ir) + 1     
+   end do
+   
+   density = this%npart/(4.0/3.0*PI*this%length**3)
+   
+   do i=1,this%numbins
+      vol = 4.0/3.0*PI*((this%delta*i)**3 - (this%delta*(i-1))**3)
+      tmp_rdf(i) = tmp_rdf(i) / density / vol
+   end do
+
+   call MPI_ALLREDUCE(tmp_rdf, this%rdf, this%numbins, MPI_DOUBLE_PRECISION, MPI_SUM, MPI_COMM_WORLD, ierr)
+
+   this%rdf=this%rdf/this%numproc
+  end subroutine compute_rdf
+
+  subroutine write_rdf(this, filename)
+   implicit none
+   class(simulation), intent(in) :: this
+   character(len=*), intent(in) :: filename
+   integer :: i
+   integer :: unit
+   
+   ! Open the binary file for writing
+   open(newunit=unit, file=filename, status='replace', form='unformatted', access='stream')
+
+   ! Write velocities to the binary file
+   do i = 1, this%numbins
+      write(unit) this%rdf(i)
+   end do
+
+   ! Close the binary file
+   close(unit) 
+  end subroutine write_rdf
+
 
 end module simulation_class

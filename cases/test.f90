@@ -31,19 +31,31 @@ program test
    a = 15.379520019471148
    b = 8.3739639785560840
 
-   call sim%init(npart=np, length=L, numbins=nbins, delta=delta, t = t, tf = tf, dt = dt, step = 0, stepf=9999, rank=rank)
+   call sim%init(npart=np, length=L, numbins=nbins, delta=delta, t = t, &
+                & tf = tf, dt = dt, step = 0, stepf=9999, rank=rank, numproc=num_procs)
    call sim%write_particle_data("./outs/init.dat")
+   call sim%compute_rdf()
+   if (rank.eq.0) call sim%write_rdf("./outs/rdf_init.dat")
 
+   ! Make sure we're all ready to rock
+   call MPI_BARRIER(MPI_COMM_WORLD, ierr)
    ! Integrate
    do while (sim%isRun)
+      ! Check for out-of-bound particles and replace them
       call sim%check_and_correct_bounds()
+      ! Update the equations
       call sim%increment_time(a, b)
+      ! Check how we're doing on time
       call sim%check_time()
+      
       if (sim%rank.eq.0) call sim%print()
       if (mod(sim%step, 100).eq.0) then
          call sim%write_particle_data("./outs/test.dat")
+         call sim%compute_rdf()
+         call sim%write_rdf("./outs/rdf.dat")
       end if
    end do
 
+   call MPI_BARRIER(MPI_COMM_WORLD, ierr)
    call MPI_FINALIZE(ierr)
 end program test
