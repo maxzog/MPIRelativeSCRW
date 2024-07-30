@@ -223,25 +223,122 @@ contains
       class(simulation), intent(inout) :: this
       type(part) :: p
       real(8), intent(in) :: a, b
-      real(8), dimension(3) :: dWi, dWj
-      real(8) :: rho, mean
-      integer :: i
-      mean=0.0
+      real(8), dimension(3,3) :: temp, bij, Q
+      real(8), dimension(3) :: dWi, dWj, i1, i2, i3, rll, rt1, rt2
+      real(8) :: rho_ll, rho_nn, mean, std, rll_dot, rt1_dot, rt2_dot
+      integer :: i, ind
+
+      ! Identity
+      i1 = [1.0, 0.0, 0.0]
+      i2 = [0.0, 1.0, 0.0]
+      i3 = [0.0, 0.0, 1.0]
+
+      ! Random normal parameters
+      mean=0.0; std = sqrt(this%dt)
 
       do i=1,this%npart
+         ! Reset arrays
+         Q    = 0.0
+         temp = 0.0
+         bij  = 0.0
+
+         ! Grab particle from storage
          p = this%ps(i)
-         rho = kernel(p%pos, this%delta)
-         dWi = [random_normal(m=mean,sd=sqrt(this%dt)), & 
-         &      random_normal(m=mean,sd=sqrt(this%dt)), & 
-         &      random_normal(m=mean,sd=sqrt(this%dt))]
-         dWj = [random_normal(m=mean,sd=sqrt(this%dt)), & 
-         &      random_normal(m=mean,sd=sqrt(this%dt)), & 
-         &      random_normal(m=mean,sd=sqrt(this%dt))]
-         p%vel = (1.0 - a*this%dt)*p%vel + b*((1.0 - rho)*dWi + (rho - 1.0)*dWj)/sqrt(1.0 + rho**2)
+
+         ! Get filter kernel
+         rho_ll = kernel(p%pos,6.2832d0/16.0)
+         rho_nn = kernel(p%pos,6.2832d0/16.0)
+
+         ! Get dW for particle i
+         dWi = [random_normal(m=mean,sd=std), & 
+         &      random_normal(m=mean,sd=std), & 
+         &      random_normal(m=mean,sd=std)]
+         ! Get dW for particle j
+         dWj = [random_normal(m=mean,sd=std), & 
+         &      random_normal(m=mean,sd=std), & 
+         &      random_normal(m=mean,sd=std)]
+
+         ! Compute the reference axes
+         rll = p%pos
+         rll_dot = dot_product(rll,rll)+epsilon(1.0)
+
+         ! Generate an orthonormal set based on max slip component
+         ind = maxloc(abs(rll),dim=1)
+         select case (ind)
+         case(1)
+            ! Max slip in x-direction
+            rt1     = -(rll(2)/rll_dot)*rll
+            rt1(2)  = 1.0 + rt1(2)
+            rt1_dot = dot_product(rt1,rt1)+epsilon(1.0)
+         case(2)
+            ! Max slip in y-direction
+            rt1     = -(rll(1)/rll_dot)*rll
+            rt1(1)  = 1.0 + rt1(1)
+            rt1_dot = dot_product(rt1,rt1)+epsilon(1.0)
+         case(3)
+            ! Max slip in z-direction
+            rt1     = -(rll(1)/rll_dot)*rll
+            rt1(1)  = 1.0 + rt1(1)
+            rt1_dot = dot_product(rt1,rt1)+epsilon(1.0)                
+         end select
+
+         ! rt2 right-hand coordinate system (cross product)
+         rt2(1) = rll(2)*rt1(3) - rll(3)*rt1(2)
+         rt2(2) = rll(3)*rt1(1) - rll(1)*rt1(3)
+         rt2(3) = rll(1)*rt1(2) - rll(2)*rt1(1)
+         rt2_dot = dot_product(rt2,rt2)+epsilon(1.0)
+
+         ! Normalize basis vectors
+         rll = rll/sqrt(rll_dot)
+         rt1 = rt1/sqrt(rt1_dot)
+         rt2 = rt2/sqrt(rt2_dot)
+
+         ! Construct rotation matrices
+         Q(:,1) = rll
+         Q(:,2) = rt1
+         Q(:,3) = rt2
+
+         ! Multiply Q by b^dag
+         temp(1,1) = Q(1,1)*rho_ll 
+         temp(2,1) = Q(2,1)*rho_ll
+         temp(3,1) = Q(3,1)*rho_ll
+
+         temp(1,2) = Q(1,2)*rho_nn 
+         temp(2,2) = Q(2,2)*rho_nn
+         temp(3,2) = Q(3,2)*rho_nn
+
+         temp(1,3) = Q(1,3)*rho_nn
+         temp(2,3) = Q(2,3)*rho_nn
+         temp(3,3) = Q(3,3)*rho_nn
+
+         ! Multiply Q*b^dag (temp) by Q^T  to get R tensor
+         bij(1,1) = temp(1,1)*Q(1,1) + temp(1,2)*Q(1,2) + temp(1,3)*Q(1,3)
+         bij(1,2) = temp(1,1)*Q(2,1) + temp(1,2)*Q(2,2) + temp(1,3)*Q(2,3)
+         bij(1,3) = temp(1,1)*Q(3,1) + temp(1,2)*Q(3,2) + temp(1,3)*Q(3,3)
+
+         bij(2,1) = temp(2,1)*Q(1,1) + temp(2,2)*Q(1,2) + temp(2,3)*Q(1,3)
+         bij(2,2) = temp(2,1)*Q(2,1) + temp(2,2)*Q(2,2) + temp(2,3)*Q(2,3)
+         bij(2,3) = temp(2,1)*Q(3,1) + temp(2,2)*Q(3,2) + temp(2,3)*Q(3,3)
+
+         bij(3,1) = temp(3,1)*Q(1,1) + temp(3,2)*Q(1,2) + temp(3,3)*Q(1,3)
+         bij(3,2) = temp(3,1)*Q(2,1) + temp(3,2)*Q(2,2) + temp(3,3)*Q(2,3)
+         bij(3,3) = temp(3,1)*Q(3,1) + temp(3,2)*Q(3,2) + temp(3,3)*Q(3,3)
+
+         ! Update velocity
+         ! p%vel = (1.0 - a*this%dt)*p%vel + b*((1.0 - rho)*dWi + (rho - 1.0)*dWj)/sqrt(1.0 + rho**2)
+         p%vel(1) = (1.0 - a*this%dt)*p%vel(1) + & 
+         &          b*(dot_product(i1-bij(1,:),dWi) + dot_product(bij(1,:)-i1,dWj))/sqrt(1.0 + sum(bij(1,:)**2))
+         p%vel(2) = (1.0 - a*this%dt)*p%vel(2) + & 
+         &          b*(dot_product(i2-bij(2,:),dWi) + dot_product(bij(2,:)-i2,dWj))/sqrt(1.0 + sum(bij(2,:)**2))
+         p%vel(3) = (1.0 - a*this%dt)*p%vel(3) + & 
+         &          b*(dot_product(i3-bij(3,:),dWi) + dot_product(bij(3,:)-i3,dWj))/sqrt(1.0 + sum(bij(3,:)**2))
+         ! Update position
          p%pos = p%pos + p%vel*this%dt
+         ! Put particle back in storage
          this%ps(i) = p
       end do
-
+      
+      ! Update time and step counter
       this%t = this%t + this%dt
       this%step = this%step + 1
    end subroutine increment_time
@@ -259,7 +356,8 @@ contains
       do i=1,this%npart
          r = norm2(this%ps(i)%pos)
          if (r.gt.this%length) then
-            this%ps(i)%pos = get_rand_pos(this%length)
+            ! this%ps(i)%pos = get_rand_pos(this%length)
+            this%ps(i)%pos = this%ps(i)%pos - 2.0*this%ps(i)%pos
             this%particles_removed = this%particles_removed + 1
          end if
       end do
@@ -303,7 +401,8 @@ contains
    implicit none
    class(simulation), intent(in) :: this
 
-   write(*,'(A, F8.2, A, I5, A, I5)') "Time :: ", this%t, "   Step :: ", this%step, "  Particles removed :: ", this%particles_removed
+   write(*,'(A, F8.2, A, I5, A, I5)')  &
+      & "Time :: ", this%t, "   Step :: ", this%step, "  Particles removed :: ", this%particles_removed
   end subroutine print
 
 
