@@ -225,7 +225,7 @@ contains
       real(8), intent(in) :: a, b
       real(8), dimension(3,3) :: temp, bij, Q
       real(8), dimension(3) :: dWi, dWj, i1, i2, i3, rll, rt1, rt2
-      real(8) :: rho_ll, rho_nn, mean, std, rll_dot, rt1_dot, rt2_dot
+      real(8) :: rho_ll, rho_nn, mean, std, rll_dot, rt1_dot, rt2_dot, r, mu, sig, mux, sigx, w1, w2
       integer :: i, ind
 
       ! Identity
@@ -323,14 +323,26 @@ contains
          bij(3,1) = temp(3,1)*Q(1,1) + temp(3,2)*Q(1,2) + temp(3,3)*Q(1,3)
          bij(3,2) = temp(3,1)*Q(2,1) + temp(3,2)*Q(2,2) + temp(3,3)*Q(2,3)
          bij(3,3) = temp(3,1)*Q(3,1) + temp(3,2)*Q(3,2) + temp(3,3)*Q(3,3)
-
+      
+         ! Divergence of log normal approximation for <w|r>^2 - eyeballed
+         r = norm2(p%pos) + EPSILON(1.0d0)
+         mux = 0.85; sigx = 0.3
+         mu = LOG(mux**2/sqrt(mux**2 + sig**2))
+         sig = SQRT(LOG(1.0 + sigx**2/mux**2)) 
+         w1 = EXP(-0.5*LOG(r - mu)**2/sig**2)*(sig**2*(mu - r) - r*LOG(r - mu))/(r*sig*sqrt(2.0*PI)*sig**2*r*(r - mu)) / 850
+         ! Log normal approximation of <w^2|r> - eyeballed
+         mu = 0.8; sig = 0.25
+         mu = LOG(mux**2/sqrt(mux**2 + sig**2))
+         sig = SQRT(LOG(1.0 + sigx**2/mux**2)) 
+         w2 = 1.0/(r*sig*sqrt(2.0*PI))*EXP(-0.5*LOG(r - mu)**2/sig**2) * 4.0 
+         w1=0.0; w2=0.0
          ! Update velocity
-         ! p%vel = (1.0 - a*this%dt)*p%vel + b*((1.0 - rho)*dWi + (rho - 1.0)*dWj)/sqrt(1.0 + rho**2)
-         p%vel(1) = (1.0 - a*this%dt)*p%vel(1) + & 
+         ! p%vel = (1.0 - a*this%dt)*p%vel + b*((1.0 - rho_ll)*dWi + (rho_ll - 1.0)*dWj)/sqrt(1.0 + rho_ll**2)
+         p%vel(1) = (1.0 - a*this%dt)*p%vel(1) + (w1 + w2)*rll(1)*this%dt + & 
          &          b*(dot_product(i1-bij(1,:),dWi) + dot_product(bij(1,:)-i1,dWj))/sqrt(1.0 + sum(bij(1,:)**2))
-         p%vel(2) = (1.0 - a*this%dt)*p%vel(2) + & 
+         p%vel(2) = (1.0 - a*this%dt)*p%vel(2) + (w1 + w2)*rll(2)*this%dt + & 
          &          b*(dot_product(i2-bij(2,:),dWi) + dot_product(bij(2,:)-i2,dWj))/sqrt(1.0 + sum(bij(2,:)**2))
-         p%vel(3) = (1.0 - a*this%dt)*p%vel(3) + & 
+         p%vel(3) = (1.0 - a*this%dt)*p%vel(3) + (w1 + w2)*rll(3)*this%dt + & 
          &          b*(dot_product(i3-bij(3,:),dWi) + dot_product(bij(3,:)-i3,dWj))/sqrt(1.0 + sum(bij(3,:)**2))
          ! Update position
          p%pos = p%pos + p%vel*this%dt

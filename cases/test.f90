@@ -24,7 +24,7 @@ program test
    L = 3.5
    nbins = 128
    delta = L/nbins
-   np = 1000000
+   np = 100000
 
 
    ! State compute and write period
@@ -34,6 +34,7 @@ program test
    tf = 50.0
    dt = 0.001
 
+   ! a = 15.379520019471148
    a = 15.379520019471148
    b = 8.3739639785560840
 
