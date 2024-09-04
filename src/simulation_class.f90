@@ -326,16 +326,16 @@ contains
       
          ! Divergence of log normal approximation for <w|r>^2 - eyeballed
          r = norm2(p%pos) + EPSILON(1.0d0)
-         mux = 0.85; sigx = 0.3
-         mu = LOG(mux**2/sqrt(mux**2 + sig**2))
+         mux = 0.74; sigx = 0.18
+         mu = LOG(mux**2/sqrt(mux**2 + sigx**2))
          sig = SQRT(LOG(1.0 + sigx**2/mux**2)) 
-         w1 = EXP(-0.5*LOG(r - mu)**2/sig**2)*(sig**2*(mu - r) - r*LOG(r - mu))/(r*sig*sqrt(2.0*PI)*sig**2*r*(r - mu)) / 850
+         w1 = EXP(-0.5*LOG(r - mu)**2/sig**2)*(sig**2*(mu - r) - r*LOG(r - mu))/(r*sig*sqrt(2.0*PI)*sig**2*r*(r - mu)) / 450.0
          ! Log normal approximation of <w^2|r> - eyeballed
-         mu = 0.8; sig = 0.25
-         mu = LOG(mux**2/sqrt(mux**2 + sig**2))
+         mu = 0.74; sig = 0.18
+         mu = LOG(mux**2/sqrt(mux**2 + sigx**2))
          sig = SQRT(LOG(1.0 + sigx**2/mux**2)) 
-         w2 = 1.0/(r*sig*sqrt(2.0*PI))*EXP(-0.5*LOG(r - mu)**2/sig**2) * 4.0 
-         w1=0.0; w2=0.0
+         w2 = 1.0/(r*sig*sqrt(2.0*PI))*EXP(-0.5*LOG(r - mu)**2/sig**2) * 3.0 
+         ! w1=0.0; w2=0.0
          ! Update velocity
          ! p%vel = (1.0 - a*this%dt)*p%vel + b*((1.0 - rho_ll)*dWi + (rho_ll - 1.0)*dWj)/sqrt(1.0 + rho_ll**2)
          p%vel(1) = (1.0 - a*this%dt)*p%vel(1) + (w1 + w2)*rll(1)*this%dt + & 
@@ -501,7 +501,7 @@ contains
       ir = min(this%numbins, ir)
       rhat = this%ps(i)%pos/r
       
-      this%w2(ir) = this%w2(ir) + dot_product(this%ps(i)%vel,rhat)**2
+      this%w2(ir) = this%w2(ir) + (dot_product(this%ps(i)%vel,rhat) - this%w1(ir))**2
       this%c(ir) = this%c(ir) + 1
    end do
 

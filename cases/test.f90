@@ -28,19 +28,19 @@ program test
 
 
    ! State compute and write period
-   period = 250
+   period = 500
 
    t = 0.0
-   tf = 50.0
+   tf = 500.0
    dt = 0.001
 
    ! a = 15.379520019471148
    a = 15.379520019471148
    b = 8.3739639785560840
 
-   call sim%init(npart=np, length=L, numbins=nbins, delta=delta, t = t, &
-                & tf = tf, dt = dt, step = 0, stepf=999999, rank=rank, numproc=num_procs)
-   call sim%write_particle_data("./outs/init.dat")
+   call sim%init(npart=np, length=L, numbins=nbins, delta=delta, t=t, &
+                & tf=tf, dt=dt, step=0, stepf=999999, rank=rank, numproc=num_procs)
+   ! call sim%write_particle_data("./outs/init.dat")
    call sim%compute_rdf()
    if (rank.eq.0) call sim%write_rdf("./outs/rdf_init.dat")
 
@@ -70,6 +70,8 @@ program test
          ! Write second moment of velocity | r
          write(filename, '("./outs/w2_", I0, ".dat")') sim%step
          if (sim%rank.eq.0) call sim%write_w2(filename)
+         ! write(filename, '("./outs/part_", I0, ".dat")') sim%step
+         ! call sim%write_particle_data(filename)
       end if
    end do
 
