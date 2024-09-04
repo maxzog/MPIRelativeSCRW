@@ -1,41 +1,42 @@
-# Compiler and flags
+# Compiler
 FC = mpif90
-FLAGS = -fallow-argument-mismatch -O3 -ffast-math -march=native -fopenmp -J$(OBJ_DIR)
 
-# Directory paths
-SRC_DIR = ./src
-OBJ_DIR = ./obj
-BIN_DIR = ./bin
-OUT_DIR = ./outs
-CASES_DIR = ./cases
+# Compiler flags
+FFLAGS = -fallow-argument-mismatch -O3 -ffast-math -march=native
+
+# Directories
+SRC_DIR = src
+OBJ_DIR = obj
+CASES_DIR = cases
 
 # Source files
-MODULE_SOURCES = $(SRC_DIR)/simulation_class.f90
-MODULE_OBJECTS = $(MODULE_SOURCES:$(SRC_DIR)/%.f90=$(OBJ_DIR)/%.o)
-SOURCES = $(filter-out $(MODULE_SOURCES), $(wildcard $(SRC_DIR)/*.f90))
-OBJECTS = $(SOURCES:$(SRC_DIR)/%.f90=$(OBJ_DIR)/%.o)
+TRACER_SRC = $(SRC_DIR)/tracer_class.f90
+TRACER_MAIN = $(CASES_DIR)/tracer.f90
+
+INERTIAL_SRC = $(SRC_DIR)/inertial_class.f90
+INERTIAL_MAIN = $(CASES_DIR)/inertial.f90
+
+# Executables
+TRACER_EXE = program_tracer
+INERTIAL_EXE = program_inertial
+
+directories:
+	@mkdir -p ./bin
+	@mkdir -p ./obj
+	@mkdir -p ./outs
 
 # Default target
-all: test
+all: directories tracer inertial
 
-# Ensure necessary directories are available
-directories:
-	@mkdir -p $(BIN_DIR)
-	@mkdir -p $(OBJ_DIR)
-	@mkdir -p $(OUT_DIR)
+# Build tracer
+tracer: directories $(OBJ_DIR) $(TRACER_SRC) $(TRACER_MAIN)
+	$(FC) $(FFLAGS) -J$(OBJ_DIR) -o $(TRACER_EXE) $(TRACER_SRC) $(TRACER_MAIN)
 
-# Rule to compile .f90 files to .o files
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.f90 | directories
-	$(FC) $(FLAGS) -c $< -o $@
+# Build inertial
+inertial: directories $(OBJ_DIR) $(INERTIAL_SRC) $(INERTIAL_MAIN)
+	$(FC) $(FFLAGS) -J$(OBJ_DIR) -o $(INERTIAL_EXE) $(INERTIAL_SRC) $(INERTIAL_MAIN)
 
-# Test target
-test: directories $(BIN_DIR)/program_test
-
-# Link all necessary objects and test case to create the executable
-$(BIN_DIR)/program_test: $(CASES_DIR)/test.f90 $(MODULE_OBJECTS) $(OBJECTS)
-	$(FC) $(FLAGS) -I$(OBJ_DIR) -o $@ $^
-
-# Clean target
-.PHONY: clean
+# Clean up
 clean:
-	$(RM) $(OBJ_DIR)/*.o $(OBJ_DIR)/*.mod $(BIN_DIR)/program_test
+	rm -f $(TRACER_EXE) $(INERTIAL_EXE)
+	rm -r ./obj
